@@ -1,0 +1,51 @@
+# Dependencies
+node_modules/
+vendor/node_modules/
+
+# Build / dist
+bundle/
+dist/
+build/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Cache / temp
+.cache/
+.tmp/
+*.log
+*.cache
+
+# CodeGraph index
+.codegraph/
+
+# Local memory / session
+.remember/
+.playwright-mcp/
+*.local.*
+# Scratch
+app.js.restored
+
+# Generated assets
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.avif
+
+# Test files
+test*.pdf
+*.test.*
+
+# Environment
+.env
+.env.local
+.env.*.local

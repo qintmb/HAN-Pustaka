@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HAN-Pustaka</title>
+
+  <link rel="stylesheet" href="vendor/css/font-awesome.css">
+  <link rel="stylesheet" href="vendor/css/flipbook.style.css">
+  <link rel="stylesheet" href="styles.css">
+
+  <!-- Vendor scripts: urutan penting -->
+  <script src="vendor/js/jquery-1.8.3.min.js"></script>
+  <script src="vendor/js/jquery-ui-1.9.2.min.js"></script>
+  <script src="vendor/js/iscroll.min.js"></script>
+  <script src="vendor/js/three.min.js"></script>
+  <script src="vendor/js/pdf.min.js"></script>
+  <script src="vendor/js/flipbook.min.js"></script>
+  <script src="vendor/js/flipbook.webgl.min.js"></script>
+  <script src="vendor/js/flipbook.swipe.min.js"></script>
+  <script src="vendor/js/flipbook.book3.min.js"></script>
+  <script src="vendor/js/flipbook.pdfservice.min.js"></script>
+  <script type="module" src="app.js"></script>
+</head>
+
+<body>
+  <!-- Navbar -->
+  <nav class="navbar" id="uploadDropZone" aria-label="Unggah PDF">
+    <a class="navbar-brand" href="#" id="brandHome">
+      <i class="fa fa-book" aria-hidden="true"></i>
+      <span>HAN-Pustaka</span>
+    </a>
+    <input type="file" id="fileInput" accept="application/pdf,.pdf" hidden>
+    <form class="navbar-search" id="searchForm" role="search">
+      <label class="sr-only" for="searchInput">Cari PDF</label>
+      <input class="form-control" type="search" id="searchInput" placeholder="Cari PDF...">
+      <button class="btn btn-outline search-button" type="submit" aria-label="Cari PDF" title="Cari PDF"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg></button>
+    </form>
+    <button type="button" class="upload-button" id="browseBtn" aria-label="Tambah PDF" title="Tambah PDF">+</button>
+  </nav>
+
+  <div class="navbar-spacer"></div>
+
+    <main class="container">
+    <div class="app-layout">
+      <!-- Left Sidebar: Book details -->
+      <aside class="sidebar sidebar-left is-hidden" id="sidebar" aria-label="Detail buku">
+        <header class="sidebar-header">
+          <h2>Detail File</h2>
+        </header>
+        <section id="detailCard" class="card detail-card" hidden>
+          <img id="detailCover" class="detail-cover" alt="">
+          <h3 id="detailTitle"></h3>
+          <div class="detail-actions">
+            <button type="button" class="btn btn-primary" id="detailRead">
+              View <i class="fa fa-book-reader" aria-hidden="true"></i>
+            </button>
+          </div>
+          <div class="detail-information">
+              <p class="detail-meta">
+                <span id="detailSize"></span>
+                <span id="detailDate"></span>
+                <span id="detailPages"></span>
+              </p>
+              <fieldset class="pdf-category">
+                <legend>Tampilan PDF</legend>
+                <label><input type="radio" name="pdfCategory" value="book" checked> Buku</label>
+                <label><input type="radio" name="pdfCategory" value="calendar"> Kalender</label>
+              </fieldset>
+              <p class="detail-description" id="detailDescription"></p>
+              <button type="button" class="btn btn-danger detail-delete" id="detailDelete" aria-label="Hapus buku">
+                <i class="fa fa-trash" aria-hidden="true"></i> Hapus buku
+              </button>
+          </div>
+        </section>
+      </aside>
+
+      <!-- Middle: Bookshelf -->
+      <div class="main-content">
+        <!-- Bookshelf -->
+        <div id="shelfArea"></div>
+
+        <!-- Pagination -->
+        <nav id="pagination" class="pagination-wrap" aria-label="Navigasi halaman rak" hidden></nav>
+
+      </div>
+
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <!-- Host flipbook: elemen pemicu; plugin membuat overlay-nya sendiri -->
+  <div id="bookHost" class="book-host"></div>
+  <div class="toast-container" id="toastContainer" role="status" aria-live="polite"></div>
+</body>
+
+</html>

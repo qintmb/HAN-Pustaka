@@ -1,0 +1,957 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PDF Flip Buku</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:#20232b;color:#eef0f5;
+    font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    overflow:hidden;user-select:none;-webkit-user-select:none;
+  }
+  #app{display:flex;flex-direction:column;height:100vh;height:100dvh}
+
+  /* ---------- toolbar ---------- */
+  #bar{
+    display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+    padding:8px 12px;z-index:50;position:relative;
+    background:rgba(12,14,19,.82);backdrop-filter:blur(8px);
+    border-bottom:1px solid rgba(255,255,255,.08);
+  }
+  #title{font-weight:600;max-width:30vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.92}
+  .sp{flex:1}
+  button{
+    font:inherit;color:inherit;cursor:pointer;
+    background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);
+    padding:6px 12px;border-radius:8px;transition:background .15s;
+  }
+  button:hover:not(:disabled){background:rgba(255,255,255,.18)}
+  button:disabled{opacity:.35;cursor:default}
+  button.primary{background:#4c7dff;border-color:#4c7dff;color:#fff}
+  button.primary:hover{background:#6490ff!important}
+  #pageInput{
+    width:58px;font:inherit;color:inherit;text-align:center;
+    background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);
+    border-radius:8px;padding:6px 4px;
+  }
+  #label{min-width:96px;text-align:center;opacity:.85;font-variant-numeric:tabular-nums}
+
+  /* ---------- panggung ---------- */
+  #stage{flex:1;min-height:0;position:relative;overflow:hidden;touch-action:none;cursor:default}
+  #stage.zoomed{cursor:grab}
+  #stage.dragging{cursor:grabbing}
+  #cam{position:absolute;inset:0;transform-origin:50% 50%}
+  #cam.smooth{transition:transform .28s cubic-bezier(.2,.7,.2,1)}
+  #shift{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+  #book{position:relative;flex:none}
+
+  /* dinding plester (versi kalender) */
+  body.mode-calendar #stage{
+    background:
+      radial-gradient(ellipse 65% 55% at 50% 36%,rgba(255,248,228,.62),rgba(255,248,228,0) 72%),
+      radial-gradient(ellipse 125% 105% at 50% 48%,rgba(0,0,0,0) 52%,rgba(40,28,14,.42) 100%),
+      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='520' height='520'><filter id='b' x='0' y='0' width='100%' height='100%'><feTurbulence type='fractalNoise' baseFrequency='.012' numOctaves='3' seed='4' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .42  0 0 0 0 .36  0 0 0 0 .26  0 0 0 .55 -.12'/></filter><rect width='100%' height='100%' filter='url(%23b)'/></svg>"),
+      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='300' height='300'><filter id='n' x='0' y='0' width='100%' height='100%'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' seed='9' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .30  0 0 0 0 .26  0 0 0 0 .2  0 0 0 .5 -.06'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"),
+      linear-gradient(180deg,#dcd6c8 0%,#c9c2b2 100%);
+  }
+  /* meja kayu (versi buku) */
+  body.mode-book #stage{
+    background:
+      radial-gradient(ellipse 75% 65% at 50% 38%,rgba(255,226,170,.34),rgba(255,226,170,0) 72%),
+      radial-gradient(ellipse 125% 105% at 50% 48%,rgba(0,0,0,0) 48%,rgba(10,5,0,.6) 100%),
+      repeating-linear-gradient(0deg,rgba(0,0,0,0) 0 138px,rgba(20,10,2,.55) 138px 140px,rgba(255,225,170,.12) 140px 142px),
+      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='1000' height='700'><filter id='w' x='0' y='0' width='100%' height='100%'><feTurbulence type='fractalNoise' baseFrequency='.003 .13' numOctaves='5' seed='11' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .13  0 0 0 0 .065  0 0 0 0 .02  1.9 0 0 0 -.62'/></filter><rect width='100%' height='100%' filter='url(%23w)'/></svg>"),
+      linear-gradient(180deg,#a2713f,#84562f);
+  }
+
+  /* ---------- buku / kalender ---------- */
+      .gut{position:absolute;z-index:400;pointer-events:none}
+  .cast{position:absolute;z-index:500;pointer-events:none;opacity:0}
+  .rings{position:absolute;z-index:300000;pointer-events:none}
+
+  .gut.A,.gut.B{opacity:0}
+  body.mode-book .gut.A{background:linear-gradient(to right,rgba(0,0,0,.34),rgba(0,0,0,.1) 40%,rgba(0,0,0,0))}
+  body.mode-book .gut.B{background:linear-gradient(to left,rgba(0,0,0,.34),rgba(0,0,0,.1) 40%,rgba(0,0,0,0))}
+  body.mode-calendar .gut.A{background:linear-gradient(to bottom,rgba(0,0,0,.26),rgba(0,0,0,.08) 40%,rgba(0,0,0,0))}
+  body.mode-calendar .gut.B{background:linear-gradient(to top,rgba(0,0,0,.26),rgba(0,0,0,.08) 40%,rgba(0,0,0,0))}
+
+  body.mode-calendar .castA{left:0;top:50%;width:100%;height:50%;background:linear-gradient(to bottom,rgba(0,0,0,.85),rgba(0,0,0,0) 75%)}
+  body.mode-calendar .castB{left:0;top:0;width:100%;height:50%;background:linear-gradient(to top,rgba(0,0,0,.85),rgba(0,0,0,0) 75%)}
+  body.mode-book .castA{left:50%;top:0;width:50%;height:100%;background:linear-gradient(to right,rgba(0,0,0,.85),rgba(0,0,0,0) 75%)}
+  body.mode-book .castB{left:0;top:0;width:50%;height:100%;background:linear-gradient(to left,rgba(0,0,0,.85),rgba(0,0,0,0) 75%)}
+
+  .sheet{position:absolute;transform-style:preserve-3d}
+  body.mode-calendar .sheet{left:0;top:50%;width:100%;height:50%;transform-origin:50% 0}
+  body.mode-book .sheet{left:50%;top:0;width:50%;height:100%;transform-origin:0 50%}
+  .seg{position:absolute;left:0;top:0;width:100%;height:100%;transform-style:preserve-3d}
+  body.mode-calendar .seg{transform-origin:50% 0}
+  body.mode-calendar .seg.n{top:100%}
+  body.mode-book .seg{transform-origin:0 50%}
+  body.mode-book .seg.n{left:100%}
+  .piece{
+    position:absolute;left:0;top:0;background:#fff;overflow:hidden;
+    backface-visibility:hidden;-webkit-backface-visibility:hidden;
+  }
+  body.mode-calendar .piece{width:100%;height:var(--ov,calc(100% + 2px))}
+  body.mode-book .piece{width:var(--ov,calc(100% + 2px));height:100%}
+  body.mode-calendar .piece.back{transform:rotateX(180deg)}
+  body.mode-book .piece.back{transform:rotateY(180deg)}
+  .piece canvas{position:absolute;left:0;top:0;width:100%;height:100%;display:block}
+  .shade{position:absolute;inset:0;pointer-events:none}
+  /* lubang ring pada kertas kalender */
+  .holes{
+    position:absolute;left:0;right:0;top:0;pointer-events:none;
+    height:calc(24px * var(--f,1));
+    background:radial-gradient(circle at 50% calc(12px * var(--f,1)),
+      #15110e 0,#15110e calc(3.2px * var(--f,1)),rgba(0,0,0,.38) calc(3.8px * var(--f,1)),rgba(0,0,0,0) calc(5px * var(--f,1)))
+      0 0 / var(--pitch,40px) 100% repeat-x;
+  }
+  .holes.b{top:auto;bottom:0}
+
+  /* ---------- kartu awal ---------- */
+  #empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:20;padding:20px}
+  #empty .card{
+    max-width:470px;text-align:center;padding:30px 28px;border-radius:18px;
+    background:rgba(20,24,33,.86);border:1px dashed rgba(255,255,255,.3);
+    box-shadow:0 20px 60px rgba(0,0,0,.55);color:#eef0f5;
+  }
+  #empty h1{margin:0 0 8px;font-size:22px}
+  #empty p{margin:6px 0 16px;opacity:.78}
+  #empty .row{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+  #empty small{display:block;margin-top:16px;opacity:.55}
+  body.over #stage::after{
+    content:"Lepas file PDF di sini";position:absolute;inset:14px;z-index:60;
+    display:flex;align-items:center;justify-content:center;font-size:22px;color:#fff;
+    border:3px dashed #7aa2ff;border-radius:18px;background:rgba(76,125,255,.25);
+  }
+  #status{
+    position:absolute;left:0;right:0;bottom:10px;text-align:center;font-size:12px;
+    color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.8);opacity:.85;pointer-events:none;padding:0 70px;
+  }
+
+  /* ---------- tombol zoom mengambang ---------- */
+  #zoomCtl{
+    position:absolute;z-index:40;display:flex;flex-direction:column;align-items:center;gap:8px;
+    right:max(16px,env(safe-area-inset-right));bottom:max(18px,env(safe-area-inset-bottom));
+  }
+  #zoomCtl button{
+    width:46px;height:46px;padding:0;border-radius:50%;font-size:26px;line-height:1;
+    display:grid;place-items:center;
+    background:rgba(16,18,25,.82);backdrop-filter:blur(8px);
+    border:1px solid rgba(255,255,255,.22);box-shadow:0 4px 14px rgba(0,0,0,.45);
+  }
+  #zoomCtl button#zFit{font-size:18px}
+  #zPct{
+    font-size:11px;font-variant-numeric:tabular-nums;color:#fff;
+    background:rgba(16,18,25,.82);padding:2px 9px;border-radius:10px;
+    box-shadow:0 2px 8px rgba(0,0,0,.4);
+  }
+  @media (max-width:640px){
+    #title{display:none}
+    #bar{gap:6px;padding:6px 8px}
+    button{padding:6px 9px}
+  }
+  #closeBtn{display:none}
+  body.embedded #openBtn{display:none}
+  body.embedded #closeBtn{display:inline-flex}
+  body.embedded #title{max-width:24vw}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="bar">
+    <span id="title">PDF Flip – Buku</span>
+    <span class="sp"></span>
+    <button id="prevBtn" title="Halaman sebelumnya (← / ↑)">◀ Sebelumnya</button>
+    <input id="pageInput" type="number" min="1" value="1" title="Lompat ke halaman">
+    <span id="label">–</span>
+    <button id="nextBtn" title="Halaman berikutnya (→ / ↓)">Berikutnya ▶</button>
+    <span class="sp"></span>
+    <button id="soundBtn" title="Suara balik halaman">🔊</button>
+    <button id="fsBtn" title="Layar penuh">⛶</button>
+    <button id="closeBtn" title="Tutup tampilan buku">✕</button>
+    <button id="openBtn" class="primary">Buka PDF</button>
+    <input id="fileInput" type="file" accept="application/pdf,.pdf" hidden>
+  </div>
+
+  <div id="stage">
+    <div id="cam"><div id="shift"><div id="book"></div></div></div>
+
+    <div id="empty">
+      <div class="card">
+        <h1>PDF Flip – Buku</h1>
+        <p>Tampilan buku: halaman kiri &amp; kanan dengan sampul dan ketebalan halaman. Lembar dibalik dari kanan ke kiri.</p>
+        <div class="row">
+          <button class="primary" id="openBtn2">Buka PDF</button>
+          <button id="demoBtn">Coba contoh</button>
+        </div>
+        <small>Atau seret &amp; lepas file PDF ke sini</small>
+      </div>
+    </div>
+
+    <div id="zoomCtl">
+      <button id="zIn" title="Perbesar (+)" aria-label="Perbesar">+</button>
+      <div id="zPct">100%</div>
+      <button id="zOut" title="Perkecil (−)" aria-label="Perkecil">−</button>
+      <button id="zFit" title="Ukuran pas (0)" aria-label="Ukuran pas">⤢</button>
+    </div>
+    <div id="status"></div>
+  </div>
+</div>
+
+<script src="vendor/js/pdf.min.js"></script>
+<script>
+(() => {
+  'use strict';
+  const MODE = 'book';            // 'calendar' (atas-bawah) | 'book' (kiri-kanan)
+  const V = MODE === 'calendar';
+  document.body.classList.add(V ? 'mode-calendar' : 'mode-book');
+
+  const $ = id => document.getElementById(id);
+  const stage = $('stage'), cam = $('cam'), book = $('book');
+  const prevBtn = $('prevBtn'), nextBtn = $('nextBtn'), pageInput = $('pageInput');
+  const label = $('label'), titleEl = $('title'), statusEl = $('status'), emptyEl = $('empty');
+  const fileInput = $('fileInput'), zPct = $('zPct');
+
+  if (window.pdfjsLib) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/js/pdf.worker.min.js';
+  }
+  const embedded = new URLSearchParams(location.search).has('embed');
+  if (embedded) document.body.classList.add('embedded');
+  const sendToApp = data => {
+    if (embedded) parent.postMessage(data, location.origin);
+  };
+  $('closeBtn').onclick = () => sendToApp({ type: 'han-pustaka-book-close' });
+
+  const SEG = 4, BEND = 26, EXTRA = 2, RAD = Math.PI / 180;
+  const ZMIN = 0.5, ZMAX = 5;
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+  let src = null, N = 0, S = 0, maxS = 0, s = 0;
+  let ang = new Float32Array(0);
+  const sheets = new Map(), fly = new Set(), anims = new Map();
+  let PW = 0, PH = 0, along = 0, Wd = 0, Hd = 0, strip = 0, sizeKey = '';
+  let shiftPx = 0, m = 8, tMax = 4, contentW = 0, contentH = 0;
+  let zoom = 1, tx = 0, ty = 0, qual = 1;
+  let els = {};
+  let drag = null, rafId = 0;
+
+  function mk(cls, parent) {
+    const d = document.createElement('div');
+    d.className = cls;
+    if (parent) parent.appendChild(d);
+    return d;
+  }
+  const place = (el, l, t, w, h) => {
+    el.style.left = l + 'px'; el.style.top = t + 'px';
+    el.style.width = w + 'px'; el.style.height = h + 'px';
+  };
+
+  /* ================= tata letak ================= */
+  function calcRes() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    let sc = dpr * qual;
+    sc = Math.min(sc, Math.sqrt(3.4e6 / Math.max(1, PW * PH)), 4096 / Math.max(PW, PH, 1));
+    sc = Math.max(sc, 0.5);
+    if (V) {
+      strip = Math.max(2, Math.round(PH * sc / SEG));
+      Wd = Math.max(2, Math.round(PW * sc)); Hd = strip * SEG;
+    } else {
+      strip = Math.max(2, Math.round(PW * sc / SEG));
+      Wd = strip * SEG; Hd = Math.max(2, Math.round(PH * sc));
+    }
+    sizeKey = Wd + 'x' + Hd;
+    book.style.setProperty('--ov', ((strip + EXTRA) / strip * 100).toFixed(3) + '%');
+  }
+
+  function layout() {
+    const r = stage.getBoundingClientRect();
+    const ar = src ? src.aspect : 0.72;
+    const pad = 14;
+    const aw = Math.max(120, r.width - 2 * pad), ah = Math.max(120, r.height - 2 * pad);
+    PH = V ? Math.min(ah / 2.14, (aw / 1.09) / ar) : Math.min(ah / 1.1, (aw / 2.22) / ar);
+    PH = Math.max(60, Math.floor(PH));
+    PW = Math.floor(PH * ar);
+    along = V ? PH : PW;
+    m = Math.max(5, Math.round(PW * 0.026));
+    tMax = src ? clamp(2 + S * 0.12, 3, 14) : 4;
+
+    book.style.width = (V ? PW : 2 * PW) + 'px';
+    book.style.height = (V ? 2 * PH : PH) + 'px';
+    book.style.perspective = (6 * along) + 'px';
+    contentW = V ? PW + 2 * m : 2 * PW + 2 * m + 2 * tMax;
+    contentH = V ? 2 * PH + 2 * m + 2 * tMax : PH + 2 * m + 0.5 * tMax;
+
+    if (els.gutA) {
+      const g = Math.round(PW * 0.07);
+      place(els.gutA, PW, 0, g, PH);
+      place(els.gutB, PW - g, 0, g, PH);
+    }
+    calcRes();
+    clampPan(); applyCam();
+  }
+
+  function buildRings() {
+    if (!V || !els.rings) return;
+    const f = clamp(PW / 520, 0.8, 1.5);
+    const n = Math.max(4, Math.round(PW / (34 * f)));
+    const pitch = PW / n, H = 36 * f;
+    book.style.setProperty('--pitch', pitch + 'px');
+    book.style.setProperty('--f', f);
+    let h = '<defs><linearGradient id="mg" x1="0" x2="1" y1="0" y2="0">' +
+      '<stop offset="0" stop-color="#5e626a"/><stop offset=".32" stop-color="#f6f8fb"/>' +
+      '<stop offset=".62" stop-color="#9aa0a9"/><stop offset="1" stop-color="#454950"/></linearGradient>' +
+      '<filter id="rs" x="-80%" y="-20%" width="260%" height="150%">' +
+      '<feDropShadow dx="1.6" dy="2.6" stdDeviation="1.7" flood-color="#000" flood-opacity=".55"/></filter></defs>';
+    for (let j = 0; j < n; j++) {
+      const cx = pitch * (j + 0.5);
+      h += '<rect x="' + (cx - 4.6 * f) + '" y="' + (2 * f) + '" width="' + (9.2 * f) + '" height="' + (H - 4 * f) +
+        '" rx="' + (4.6 * f) + '" fill="none" stroke="url(#mg)" stroke-width="' + (2.7 * f) + '" filter="url(#rs)"/>';
+    }
+    els.rings.style.left = '0px';
+    els.rings.style.top = (PH - H / 2) + 'px';
+    els.rings.style.width = PW + 'px';
+    els.rings.style.height = H + 'px';
+    els.rings.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="' + PW + '" height="' + H +
+      '" viewBox="0 0 ' + PW + ' ' + H + '" style="overflow:visible;display:block">' + h + '</svg>';
+  }
+
+  /* ================= lembar ================= */
+  function ensureSheet(k) {
+    let sh = sheets.get(k);
+    if (sh) return sh;
+    const el = mk('sheet', book);
+    const segs = [], front = [], back = [];
+    let parent = el;
+    for (let i = 0; i < SEG; i++) {
+      const seg = mk('seg' + (i ? ' n' : ''), parent);
+      if (i === 0) { if (V) seg.style.height = (100 / SEG) + '%'; else seg.style.width = (100 / SEG) + '%'; }
+      const pf = mk('piece front', seg), pb = mk('piece back', seg);
+      const cf = document.createElement('canvas'), cb = document.createElement('canvas');
+      pf.appendChild(cf); pb.appendChild(cb);
+      const fs = mk('shade', pf), bs = mk('shade', pb);
+      if (i === 0 && V) { mk('holes', pf); mk('holes b', pb); }
+      segs.push({ el: seg, fs, bs });
+      front.push(cf); back.push(cb);
+      parent = seg;
+    }
+    sh = { el, segs, front, back, kf: null, kb: null, key: '' };
+    sheets.set(k, sh);
+    apply(k);
+    return sh;
+  }
+  function freeSheet(k) {
+    const sh = sheets.get(k);
+    if (!sh) return;
+    sh.el.remove(); sheets.delete(k);
+  }
+
+  const gF = V ? 'to bottom' : 'to right', gB = V ? 'to top' : 'to left';
+  function apply(k) {
+    const a = ang[k];
+    const flying = a > 0.05 && a < 179.95;
+    if (flying) fly.add(k); else fly.delete(k);
+    const sh = sheets.get(k);
+    if (!sh) return;
+    const T = flying ? BEND * Math.sin(a * RAD) : 0;
+    const c = T / (SEG - 1);
+    let z;
+    if (flying) z = 100000 + (a >= 90 ? k : -k);
+    else z = k < s ? 100 - (s - 1 - k) : 100 - (k - s);
+    const key = a.toFixed(2) + '|' + z;
+    if (key === sh.key) return;
+    sh.key = key;
+    sh.el.style.transform = V ? 'rotateX(' + a + 'deg)' : 'rotateY(' + (-a) + 'deg)';
+    sh.el.style.zIndex = z;
+    for (let i = 0; i < SEG; i++) {
+      const sg = sh.segs[i];
+      if (i > 0) sg.el.style.transform = V ? 'rotateX(' + c + 'deg)' : 'rotateY(' + (-c) + 'deg)';
+      const th = a + i * c;
+      const fd = th <= 90 ? 0.5 * Math.pow(Math.max(0, th) / 90, 1.3) : 0.5;
+      const bd = th >= 90 ? 0.5 * Math.pow(Math.max(0, 180 - th) / 90, 1.3) : 0.5;
+      sg.fs.style.background = (i === 0 ? 'linear-gradient(' + gF + ',rgba(0,0,0,.2),rgba(0,0,0,0) 60%),' : '') +
+        'rgba(0,0,0,' + fd.toFixed(3) + ')';
+      sg.bs.style.background = (i === 0 ? 'linear-gradient(' + gB + ',rgba(0,0,0,.2),rgba(0,0,0,0) 60%),' : '') +
+        'rgba(0,0,0,' + bd.toFixed(3) + ')';
+    }
+  }
+
+  function updateGlobal() {
+    if (!S || !els.gutA) return;
+    let sum = 0;
+    for (let k = 0; k < S; k++) sum += ang[k];
+    const flipped = sum / 180, a0 = ang[0], aL = ang[S - 1];
+    shiftPx = -(along / 2) * (1 - a0 / 180) + (along / 2) * (aL / 180);
+    $('shift').style.transform = 'translateX(' + shiftPx.toFixed(2) + 'px)';
+    const opB = clamp(a0 / 45, 0, 1), opA = clamp((180 - aL) / 45, 0, 1);
+    els.gutA.style.opacity = opA; els.gutB.style.opacity = opB;
+    let cl = 0, cu = 0;
+    for (const k of fly) {
+      const a = ang[k], sn = Math.sin(a * RAD);
+      if (k + 1 < S) cl = Math.max(cl, 0.5 * sn * clamp((135 - a) / 45, 0, 1));
+      if (k >= 1) cu = Math.max(cu, 0.5 * sn * clamp((a - 45) / 45, 0, 1));
+    }
+    els.castA.style.opacity = cl.toFixed(3);
+    els.castB.style.opacity = cu.toFixed(3);
+  }
+  function refreshWindow() {
+    if (!S) return;
+    const R = qual > 1 ? 2 : 3;
+    const lo = Math.max(0, s - R), hi = Math.min(S - 1, s + R);
+    for (let k = lo; k <= hi; k++) ensureSheet(k);
+    for (const [k, sh] of Array.from(sheets)) {
+      const inWin = k >= lo && k <= hi, flying = fly.has(k);
+      sh.el.style.display = (inWin || flying) ? '' : 'none';
+      if (!inWin && !flying) { freeSheet(k); continue; }
+      sh.key = '';
+      apply(k);
+    }
+    updateGlobal();
+    refreshQueue();
+  }
+
+  /* ================= render halaman (antrian) ================= */
+  const OFF = document.createElement('canvas');
+  let queue = [], pumping = false, curTask = null, epoch = 0;
+  function refreshQueue() {
+    queue = [];
+    const b = 2 * s;
+    [b + 1, b, b + 2, b + 3, b - 1, b - 2, b + 4, b + 5, b - 3, b - 4].forEach(p => {
+      if (p >= 1 && p <= N) queue.push(p);
+    });
+    pump();
+  }
+  async function pump() {
+    if (pumping) return;
+    pumping = true;
+    try { while (queue.length) await renderPage(queue.shift()); }
+    finally { pumping = false; }
+  }
+  async function renderPage(p) {
+    const k = (p - 1) >> 1, sh = sheets.get(k);
+    if (!sh || !src) return;
+    const odd = (p & 1) === 1, kk = odd ? 'kf' : 'kb', arr = odd ? sh.front : sh.back;
+    if (sh[kk] === sizeKey) return;
+    const ep = epoch, mySize = sizeKey, w = Wd, h = Hd, st = strip;
+    try { const task = src.render(p, OFF, w, h); curTask = task; await task.promise; }
+    catch (e) { return; }
+    if (ep !== epoch || sheets.get(k) !== sh || mySize !== sizeKey) return;
+    for (let i = 0; i < SEG; i++) {
+      const si = odd ? i : SEG - 1 - i, c = arr[i];
+      // tiap potongan membawa EXTRA piksel dari potongan sebelahnya, supaya tidak ada celah & tidak melar
+      if (V) {
+        const hh = Math.min(st + EXTRA, h - si * st);
+        c.width = w; c.height = st + EXTRA;
+        c.getContext('2d').drawImage(OFF, 0, si * st, w, hh, 0, 0, w, hh);
+      } else {
+        const ww = Math.min(st + EXTRA, w - si * st);
+        c.width = st + EXTRA; c.height = h;
+        c.getContext('2d').drawImage(OFF, si * st, 0, ww, h, 0, 0, ww, h);
+      }
+    }
+    sh[kk] = mySize;
+  }
+  function invalidateRender() {
+    epoch++;
+    if (curTask) { try { curTask.cancel(); } catch (e) {} }
+    for (const sh of sheets.values()) { sh.kf = null; sh.kb = null; }
+  }
+
+  /* ================= animasi ================= */
+  const ease = t => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  function animate(k, to) {
+    const from = ang[k];
+    if (from === to) { anims.delete(k); apply(k); updateGlobal(); return; }
+    anims.set(k, { from, to, t0: performance.now(), dur: 450 + 700 * Math.abs(to - from) / 180 });
+    if (!rafId) rafId = requestAnimationFrame(frame);
+  }
+  function frame(now) {
+    rafId = 0;
+    for (const [k, an] of Array.from(anims)) {
+      const t = (now - an.t0) / an.dur;
+      if (t >= 1) { ang[k] = an.to; anims.delete(k); }
+      else ang[k] = an.from + (an.to - an.from) * ease(t);
+      apply(k);
+    }
+    updateGlobal();
+    if (anims.size) rafId = requestAnimationFrame(frame);
+    else refreshWindow();
+  }
+
+  /* ================= navigasi ================= */
+  function goTo(ns) {
+    if (!src) return;
+    ns = clamp(ns, 0, maxS);
+    if (ns === s) return;
+    const old = s, d = ns - old;
+    s = ns;
+    const b = d > 0 ? ns - 1 : ns;
+    if (Math.abs(d) > 1) {
+      anims.clear();
+      for (let k = 0; k < S; k++) ang[k] = k < ns ? 180 : 0;
+      ang[b] = d > 0 ? 0 : 180;
+      fly.clear();
+      for (const sh of sheets.values()) sh.key = '';
+    }
+    refreshWindow();
+    animate(b, d > 0 ? 180 : 0);
+    swish();
+    updateUI();
+  }
+  const next = () => goTo(s + 1);
+  const prev = () => goTo(s - 1);
+
+  function updateUI() {
+    if (!src) { label.textContent = '–'; prevBtn.disabled = nextBtn.disabled = true; return; }
+    const lo = 2 * s, hi = 2 * s + 1, arr = [];
+    if (lo >= 1 && lo <= N) arr.push(lo);
+    if (hi <= N) arr.push(hi);
+    label.textContent = (arr.length > 1 ? arr[0] + '–' + arr[1] : arr[0]) + ' / ' + N;
+    if (document.activeElement !== pageInput) pageInput.value = arr[0];
+    pageInput.max = N;
+    prevBtn.disabled = s <= 0;
+    nextBtn.disabled = s >= maxS;
+    sendToApp({ type: 'han-pustaka-book-page', page: arr[0] || 1, numPages: N });
+  }
+
+  /* ================= zoom & geser ================= */
+  function clampPan() {
+    const sw = stage.clientWidth, sh = stage.clientHeight;
+    if (zoom <= 1.001) { tx = ty = 0; return; }
+    const cw = contentW * zoom, ch = contentH * zoom;
+    const mx = cw > sw ? (cw - sw) / 2 + 60 : 0, my = ch > sh ? (ch - sh) / 2 + 60 : 0;
+    tx = clamp(tx, -mx, mx); ty = clamp(ty, -my, my);
+  }
+  function applyCam() {
+    cam.style.transform = 'translate(' + tx.toFixed(2) + 'px,' + ty.toFixed(2) + 'px) scale(' + zoom.toFixed(4) + ')';
+    zPct.textContent = Math.round(zoom * 100) + '%';
+    stage.classList.toggle('zoomed', zoom > 1.02);
+    $('zIn').disabled = zoom >= ZMAX - 0.001;
+    $('zOut').disabled = zoom <= ZMIN + 0.001;
+  }
+  function setZoom(nz, cx, cy, smooth) {
+    nz = clamp(nz, ZMIN, ZMAX);
+    if (Math.abs(nz - 1) < 0.06) nz = 1;
+    const k = nz / zoom;
+    cx = cx || 0; cy = cy || 0;
+    tx = cx - k * (cx - tx); ty = cy - k * (cy - ty);
+    zoom = nz;
+    clampPan();
+    cam.classList.toggle('smooth', !!smooth);
+    applyCam();
+    scheduleQual();
+    if (zoom > 1.02 && !zoomHinted) {
+      zoomHinted = true;
+      statusEl.textContent = 'Seret untuk menggeser fokus · tombol ◀ ▶ untuk membalik halaman';
+      setTimeout(() => { if (statusEl.textContent.startsWith('Seret')) statusEl.textContent = ''; }, 5000);
+    }
+  }
+  let zoomHinted = false, qualT = 0;
+  function scheduleQual() {
+    clearTimeout(qualT);
+    qualT = setTimeout(() => {
+      const nq = zoom <= 1.3 ? 1 : zoom <= 2.4 ? 2 : 3;
+      if (nq === qual || !src) return;
+      qual = nq; calcRes(); invalidateRender(); refreshWindow();
+    }, 300);
+  }
+  $('zIn').onclick = () => setZoom(zoom * 1.3, 0, 0, true);
+  $('zOut').onclick = () => setZoom(zoom / 1.3, 0, 0, true);
+  $('zFit').onclick = () => setZoom(1, 0, 0, true);
+
+  /* ================= interaksi pointer ================= */
+  const ptrs = new Map();
+  let pinch = null;
+  const posOf = e => V ? e.clientY : e.clientX;
+  function spineP() {
+    const r = stage.getBoundingClientRect();
+    return V ? r.top + r.height / 2 + ty + zoom * shiftPx : r.left + r.width / 2 + tx + zoom * shiftPx;
+  }
+  const rel = (x, y) => {
+    const r = stage.getBoundingClientRect();
+    return [x - (r.left + r.width / 2), y - (r.top + r.height / 2)];
+  };
+
+  stage.addEventListener('pointerdown', e => {
+    if (!src || e.target.closest('#zoomCtl, #empty')) return;
+    if (e.pointerType === 'mouse' && e.button > 0) return;
+    ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    try { stage.setPointerCapture(e.pointerId); } catch (_) {}
+    cam.classList.remove('smooth');
+    if (ptrs.size === 2) {
+      if (drag && !drag.pan && drag.moved) finishFlip(drag);
+      drag = null;
+      const [a, b] = Array.from(ptrs.values());
+      pinch = { d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, z0: zoom };
+      return;
+    }
+    if (ptrs.size > 2) return;
+    if (zoom > 1.02) {
+      drag = { pan: true, id: e.pointerId, sx: e.clientX, sy: e.clientY, tx0: tx, ty0: ty };
+      stage.classList.add('dragging');
+      return;
+    }
+    const sp = spineP(), P = posOf(e);
+    let k, dir;
+    if (P >= sp) { if (s >= maxS) return; k = s; dir = 1; }
+    else { if (s <= 0) return; k = s - 1; dir = -1; }
+    drag = { k, dir, id: e.pointerId, sx: e.clientX, sy: e.clientY, g: Math.max(Math.abs(P - sp), 14),
+             moved: false, lp: P, v: 0 };
+  });
+
+  stage.addEventListener('pointermove', e => {
+    const p = ptrs.get(e.pointerId);
+    if (p) { p.x = e.clientX; p.y = e.clientY; }
+    if (pinch && ptrs.size >= 2) {
+      const [a, b] = Array.from(ptrs.values());
+      const d = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+      const [cx, cy] = rel((a.x + b.x) / 2, (a.y + b.y) / 2);
+      setZoom(pinch.z0 * d / pinch.d0, cx, cy, false);
+      return;
+    }
+    if (!drag || e.pointerId !== drag.id) return;
+    if (drag.pan) {
+      tx = drag.tx0 + (e.clientX - drag.sx); ty = drag.ty0 + (e.clientY - drag.sy);
+      clampPan(); applyCam();
+      return;
+    }
+    if (!drag.moved) {
+      if (Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < 6) return;
+      drag.moved = true;
+      anims.delete(drag.k);
+      ensureSheet(drag.k);
+      stage.classList.add('dragging');
+    }
+    const P = posOf(e);
+    drag.v = 0.6 * drag.v + 0.4 * (P - drag.lp); drag.lp = P;
+    const c = clamp((P - spineP()) / drag.g, -1, 1);
+    ang[drag.k] = Math.acos(c) / RAD;
+    apply(drag.k);
+    updateGlobal();
+  });
+
+  function finishFlip(d) {
+    const a = ang[d.k];
+    let complete;
+    if (d.dir > 0) complete = d.v < -1.5 ? true : d.v > 1.5 ? false : a > 90;
+    else complete = d.v > 1.5 ? true : d.v < -1.5 ? false : a < 90;
+    if (d.dir > 0) { s = complete ? d.k + 1 : d.k; animate(d.k, complete ? 180 : 0); }
+    else { s = complete ? d.k : d.k + 1; animate(d.k, complete ? 0 : 180); }
+    if (complete) swish();
+    refreshWindow();
+    updateUI();
+  }
+  function endPointer(e, cancelled) {
+    const had = ptrs.delete(e.pointerId);
+    try { stage.releasePointerCapture(e.pointerId); } catch (_) {}
+    if (pinch) { if (ptrs.size < 2) pinch = null; stage.classList.remove('dragging'); return; }
+    if (!had || !drag || e.pointerId !== drag.id) return;
+    const d = drag; drag = null;
+    stage.classList.remove('dragging');
+    if (d.pan) return;
+    if (!d.moved) { if (!cancelled) (d.dir > 0 ? next() : prev()); return; }
+    finishFlip(d);
+  }
+  stage.addEventListener('pointerup', e => endPointer(e, false));
+  stage.addEventListener('pointercancel', e => endPointer(e, true));
+
+  let lastWheel = 0;
+  stage.addEventListener('wheel', e => {
+    if (!src) return;
+    e.preventDefault();
+    if (e.ctrlKey || e.metaKey) {
+      const [cx, cy] = rel(e.clientX, e.clientY);
+      cam.classList.remove('smooth');
+      setZoom(zoom * Math.exp(-e.deltaY * 0.0025), cx, cy, false);
+      return;
+    }
+    if (zoom > 1.02) {
+      cam.classList.remove('smooth');
+      tx -= e.deltaX; ty -= e.deltaY; clampPan(); applyCam();
+      return;
+    }
+    const now = performance.now();
+    if (now - lastWheel < 380 || Math.abs(e.deltaY) < 4) return;
+    lastWheel = now;
+    e.deltaY > 0 ? next() : prev();
+  }, { passive: false });
+
+  function handleKey(key) {
+    switch (key) {
+      case 'ArrowDown': case 'ArrowRight': case 'PageDown': case ' ': next(); break;
+      case 'ArrowUp': case 'ArrowLeft': case 'PageUp': prev(); break;
+      case 'Home': goTo(0); break;
+      case 'End': goTo(maxS); break;
+      case '+': case '=': setZoom(zoom * 1.3, 0, 0, true); break;
+      case '-': case '_': setZoom(zoom / 1.3, 0, 0, true); break;
+      case '0': setZoom(1, 0, 0, true); break;
+      default: return;
+    }
+  }
+  window.addEventListener('keydown', e => {
+    if (e.target && e.target.tagName === 'INPUT') return;
+    handleKey(e.key);
+    e.preventDefault();
+  });
+  prevBtn.onclick = prev;
+  nextBtn.onclick = next;
+  pageInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      const p = parseInt(pageInput.value, 10);
+      if (p >= 1 && src) goTo(Math.floor(clamp(p, 1, N) / 2));
+      pageInput.blur();
+    }
+    e.stopPropagation();
+  });
+  $('fsBtn').onclick = () => {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen();
+  };
+
+  /* ================= suara ================= */
+  const flipAudio = new Audio('vendor/mp3/turnPage.mp3');
+  flipAudio.preload = 'auto';
+  let soundOn = true;
+  $('soundBtn').onclick = () => { soundOn = !soundOn; $('soundBtn').textContent = soundOn ? '🔊' : '🔇'; };
+  function swish() {
+    if (!soundOn) return;
+    flipAudio.currentTime = 0;
+    flipAudio.play().catch(() => {});
+  }
+
+  /* ================= mulai dokumen ================= */
+  function start(source, initialPage = 1) {
+    epoch++;
+    if (curTask) { try { curTask.cancel(); } catch (e) {} }
+    anims.clear(); fly.clear(); sheets.clear(); queue = [];
+    book.innerHTML = '';
+    src = source; N = src.n;
+    S = Math.ceil(N / 2); maxS = Math.floor(N / 2); s = clamp(initialPage === 1 ? 0 : Math.floor(initialPage / 2), 0, maxS);
+    ang = new Float32Array(S);
+    for (let k = 0; k < s; k++) ang[k] = 180;
+    zoom = 1; tx = ty = 0; qual = 1;
+
+    els = {};
+    els.gutA = mk('gut A', book);     els.gutB = mk('gut B', book);
+    els.castA = mk('cast castA', book); els.castB = mk('cast castB', book);
+    if (V) els.rings = mk('rings', book);
+
+    layout();
+    emptyEl.style.display = 'none';
+    titleEl.textContent = src.name || 'Dokumen';
+    document.title = (src.name || 'Dokumen') + ' – PDF Flip Buku';
+    refreshWindow();
+    updateUI();
+    statusEl.textContent = 'Klik atau seret halaman untuk membalik · ← → di keyboard · tombol +/− untuk zoom';
+    setTimeout(() => { if (statusEl.textContent.startsWith('Klik')) statusEl.textContent = ''; }, 6500);
+  }
+
+  /* ================= sumber PDF ================= */
+  async function openPdf(data, name, initialPage = 1) {
+    if (!window.pdfjsLib) {
+      alert('Library pdf.js gagal dimuat. Pastikan terhubung ke internet lalu muat ulang halaman.');
+      return;
+    }
+    statusEl.textContent = 'Memuat PDF...';
+    try {
+      const task = pdfjsLib.getDocument(typeof data === 'string' ? { url: data } : { data });
+      task.onPassword = (cb, reason) => {
+        const pw = prompt(reason === 2 ? 'Password salah, coba lagi:' : 'PDF ini dilindungi password:');
+        if (pw === null) task.destroy(); else cb(pw);
+      };
+      const doc = await task.promise;
+      const p1 = await doc.getPage(1);
+      const vp = p1.getViewport({ scale: 1 });
+      start({
+        n: doc.numPages,
+        aspect: vp.width / vp.height,
+        name,
+        render(p, canvas, W, H) {
+          let cancelled = false, rt = null;
+          const promise = (async () => {
+            const page = await doc.getPage(p);
+            if (cancelled) throw new Error('cancelled');
+            const v1 = page.getViewport({ scale: 1 });
+            const sc = Math.min(W / v1.width, H / v1.height);
+            const v = page.getViewport({ scale: sc });
+            canvas.width = W; canvas.height = H;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+            rt = page.render({ canvasContext: ctx, viewport: v,
+              transform: [1, 0, 0, 1, (W - v.width) / 2, (H - v.height) / 2] });
+            await rt.promise;
+          })();
+          return { promise, cancel() { cancelled = true; if (rt) rt.cancel(); } };
+        }
+      }, initialPage);
+    } catch (err) {
+      if (err && err.name === 'PasswordException') return;
+      statusEl.textContent = '';
+      sendToApp({ type: 'han-pustaka-book-error', message: err && err.message ? err.message : String(err) });
+      alert('Gagal membuka PDF: ' + (err && err.message ? err.message : err));
+    }
+  }
+  async function openFile(file) {
+    if (!file) return;
+    if (file.type && file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)) { alert('File harus berformat PDF.'); return; }
+    openPdf(await file.arrayBuffer(), file.name);
+  }
+
+  /* ================= contoh (demo) ================= */
+  function rngOf(seed) {
+    return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  }
+  function bookDemo() {
+    const hues = [215, 340, 150, 28, 270, 190, 5, 100, 320, 48, 240, 170];
+    return {
+      n: 12, aspect: 0.72, name: 'Contoh Buku (12 halaman)',
+      render(p, canvas, W, H) {
+        canvas.width = W; canvas.height = H;
+        const ctx = canvas.getContext('2d');
+        ctx.save(); ctx.scale(W / 600, H / 833);
+        const hue = hues[(p - 1) % hues.length], r = rngOf(p * 977);
+        if (p === 1) {
+          const g = ctx.createLinearGradient(0, 0, 600, 833);
+          g.addColorStop(0, '#1b2440'); g.addColorStop(1, '#6a3cff');
+          ctx.fillStyle = g; ctx.fillRect(0, 0, 600, 833);
+          for (let i = 0; i < 9; i++) {
+            ctx.beginPath(); ctx.arc(80 + r() * 440, 80 + r() * 680, 30 + r() * 110, 0, 7);
+            ctx.fillStyle = 'rgba(255,255,255,' + (0.04 + r() * 0.08) + ')'; ctx.fill();
+          }
+          ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
+          ctx.font = '700 70px Georgia,serif'; ctx.fillText('Flipbook', 300, 380);
+          ctx.font = '400 24px system-ui,sans-serif'; ctx.fillText('Balik halaman seperti buku sungguhan', 300, 432);
+          ctx.globalAlpha = .6; ctx.font = '400 18px system-ui,sans-serif';
+          ctx.fillText('Klik / seret tepi kanan halaman', 300, 760);
+        } else {
+          ctx.fillStyle = '#fdfcf8'; ctx.fillRect(0, 0, 600, 833);
+          ctx.fillStyle = 'hsl(' + hue + ',65%,48%)'; ctx.fillRect(48, 70, 70, 6);
+          ctx.fillStyle = '#2a2f3a'; ctx.font = '700 40px Georgia,serif'; ctx.textAlign = 'left';
+          ctx.fillText('Bab ' + (p - 1), 48, 130);
+          ctx.fillStyle = 'hsl(' + hue + ',60%,92%)';
+          ctx.beginPath(); ctx.arc(440, 270, 96, 0, 7); ctx.fill();
+          ctx.fillStyle = 'hsl(' + hue + ',65%,45%)'; ctx.font = '700 110px Georgia,serif';
+          ctx.textAlign = 'center'; ctx.fillText(String(p), 440, 308);
+          for (let y = 400; y < 740; y += 26) {
+            const w = 504 * (0.6 + r() * 0.4);
+            ctx.fillStyle = '#d9dce3'; ctx.fillRect(48, y, y > 700 ? w * .5 : w, 9);
+          }
+          ctx.fillStyle = '#8a90a0'; ctx.font = '400 18px Georgia,serif';
+          ctx.textAlign = p % 2 ? 'right' : 'left';
+          ctx.fillText(String(p), p % 2 ? 552 : 48, 800);
+        }
+        ctx.restore();
+        return { promise: Promise.resolve(), cancel() {} };
+      }
+    };
+  }
+  function calendarDemo() {
+    const MN = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+    const WD = ['SEN','SEL','RAB','KAM','JUM','SAB','MIN'];
+    const pal = [['#2b6cb0','#bee3f8'],['#c05621','#fbd38d'],['#2f855a','#c6f6d5'],['#b83280','#fed7e2'],
+      ['#6b46c1','#e9d8fd'],['#0987a0','#c4f1f9'],['#c53030','#fed7d7'],['#b7791f','#faf089'],
+      ['#2c7a7b','#b2f5ea'],['#975a16','#fbd38d'],['#4a5568','#e2e8f0'],['#2a4365','#bee3f8']];
+    return {
+      n: 13, aspect: 0.9, name: 'Contoh Kalender 2027',
+      render(p, canvas, W, H) {
+        canvas.width = W; canvas.height = H;
+        const ctx = canvas.getContext('2d');
+        ctx.save(); ctx.scale(W / 600, H / 667);
+        if (p === 1) {
+          const g = ctx.createLinearGradient(0, 0, 600, 667);
+          g.addColorStop(0, '#16213e'); g.addColorStop(1, '#e8604c');
+          ctx.fillStyle = g; ctx.fillRect(0, 0, 600, 667);
+          ctx.fillStyle = 'rgba(255,214,120,.9)'; ctx.beginPath(); ctx.arc(430, 250, 70, 0, 7); ctx.fill();
+          ctx.fillStyle = 'rgba(15,20,40,.55)';
+          ctx.beginPath(); ctx.moveTo(0, 520); ctx.quadraticCurveTo(150, 400, 300, 500); ctx.quadraticCurveTo(450, 410, 600, 500);
+          ctx.lineTo(600, 667); ctx.lineTo(0, 667); ctx.fill();
+          ctx.fillStyle = '#fff'; ctx.textAlign = 'left';
+          ctx.font = '700 96px Georgia,serif'; ctx.fillText('2027', 44, 150);
+          ctx.font = '400 28px system-ui,sans-serif'; ctx.fillText('Kalender Meja', 48, 194);
+          ctx.globalAlpha = .7; ctx.font = '400 18px system-ui,sans-serif';
+          ctx.fillText('Balik halaman dari bawah ke atas', 48, 620);
+        } else {
+          const mi = p - 2, c = pal[mi];
+          ctx.fillStyle = '#fffdf8'; ctx.fillRect(0, 0, 600, 667);
+          const g = ctx.createLinearGradient(0, 0, 0, 190);
+          g.addColorStop(0, c[1]); g.addColorStop(1, '#fffdf8');
+          ctx.fillStyle = g; ctx.fillRect(0, 0, 600, 190);
+          ctx.fillStyle = c[0]; ctx.globalAlpha = .85;
+          ctx.beginPath(); ctx.moveTo(0, 150); ctx.quadraticCurveTo(160, 70, 320, 140); ctx.quadraticCurveTo(470, 195, 600, 100);
+          ctx.lineTo(600, 190); ctx.lineTo(0, 190); ctx.fill(); ctx.globalAlpha = 1;
+          ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; ctx.font = '700 50px Georgia,serif';
+          ctx.fillText(MN[mi].toUpperCase(), 40, 80);
+          ctx.textAlign = 'right'; ctx.font = '400 30px Georgia,serif'; ctx.fillText('2027', 560, 80);
+          const first = new Date(2027, mi, 1), off = (first.getDay() + 6) % 7, dim = new Date(2027, mi + 1, 0).getDate();
+          const cw = 520 / 7, top = 232, rh = 66;
+          ctx.textAlign = 'center'; ctx.font = '600 15px system-ui,sans-serif';
+          for (let i = 0; i < 7; i++) { ctx.fillStyle = i === 6 ? '#d64545' : '#8a90a0'; ctx.fillText(WD[i], 40 + cw * (i + .5), top - 22); }
+          ctx.fillStyle = '#e4e6ec'; ctx.fillRect(40, top - 10, 520, 1.5);
+          ctx.font = '600 26px system-ui,sans-serif';
+          for (let d = 1; d <= dim; d++) {
+            const idx = off + d - 1, col = idx % 7, row = Math.floor(idx / 7);
+            ctx.fillStyle = col === 6 ? '#d64545' : '#2a2f3a';
+            ctx.fillText(String(d), 40 + cw * (col + .5), top + 26 + row * rh);
+            if (row < 5 || col < 7) { ctx.fillStyle = '#eef0f4'; ctx.fillRect(40 + cw * col + 8, top + 38 + row * rh, cw - 16, 1); }
+          }
+        }
+        ctx.restore();
+        return { promise: Promise.resolve(), cancel() {} };
+      }
+    };
+  }
+  const demoSource = () => V ? calendarDemo() : bookDemo();
+
+  /* ================= tombol & drag-drop ================= */
+  $('openBtn').onclick = $('openBtn2').onclick = () => fileInput.click();
+  fileInput.onchange = () => { openFile(fileInput.files[0]); fileInput.value = ''; };
+  $('demoBtn').onclick = () => start(demoSource());
+  ['dragenter', 'dragover'].forEach(ev => window.addEventListener(ev, e => { e.preventDefault(); document.body.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(ev => window.addEventListener(ev, e => {
+    e.preventDefault();
+    if (ev === 'drop' || !e.relatedTarget) document.body.classList.remove('over');
+  }));
+  window.addEventListener('drop', e => {
+    document.body.classList.remove('over');
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) openFile(f);
+  });
+
+  let rsT = 0;
+  window.addEventListener('resize', () => {
+    layout();
+    clearTimeout(rsT);
+    rsT = setTimeout(() => { if (src) { invalidateRender(); refreshQueue(); } }, 160);
+  });
+
+  layout();
+  updateUI();
+  applyCam();
+
+  // API kecil (berguna untuk embed / pengujian)
+  window.flipViewer = { next, prev, goTo, zoomIn: () => setZoom(zoom * 1.3, 0, 0, true),
+    zoomOut: () => setZoom(zoom / 1.3, 0, 0, true), setZoom: (z) => setZoom(z, 0, 0, false),
+    demo: () => start(demoSource()), openPdf, get state() { return { s, N, zoom, tx, ty, qual }; } };
+
+  const q = new URLSearchParams(location.search);
+  if (embedded) {
+    emptyEl.style.display = 'none';
+    window.addEventListener('message', event => {
+      if (event.origin !== location.origin || event.source !== parent) return;
+      if (event.data?.type === 'han-pustaka-open-book') {
+        titleEl.textContent = event.data.name || 'Dokumen';
+        openPdf(new Uint8Array(event.data.data), event.data.name || 'Dokumen', event.data.lastPage || 1);
+      } else if (event.data?.type === 'han-pustaka-book-key') {
+        handleKey(event.data.key);
+      }
+    });
+  } else if (q.get('file')) openPdf(q.get('file'), q.get('file').split('/').pop());
+  else if (q.has('demo')) start(demoSource());
+})();
+</script>
+</body>
+</html>

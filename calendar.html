@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PDF Flip Viewer</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:radial-gradient(ellipse at 50% 25%,#2b3243 0%,#151922 55%,#0c0e13 100%);
+    color:#e9ecf3;
+    font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    overflow:hidden;user-select:none;-webkit-user-select:none;
+  }
+  #app{display:flex;flex-direction:column;height:100vh;height:100dvh}
+  #bar{
+    display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+    padding:8px 12px;z-index:10;
+    background:rgba(10,12,17,.72);backdrop-filter:blur(8px);
+    border-bottom:1px solid rgba(255,255,255,.08);
+  }
+  #title{font-weight:600;max-width:32vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.9}
+  .sp{flex:1}
+  button{
+    font:inherit;color:inherit;cursor:pointer;
+    background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);
+    padding:6px 12px;border-radius:8px;transition:background .15s;
+  }
+  button:hover:not(:disabled){background:rgba(255,255,255,.18)}
+  button:disabled{opacity:.35;cursor:default}
+  button.primary{background:#4c7dff;border-color:#4c7dff;color:#fff}
+  button.primary:hover{background:#6490ff!important}
+  #pageInput{
+    width:58px;font:inherit;color:inherit;text-align:center;
+    background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);
+    border-radius:8px;padding:6px 4px;
+  }
+  #label{min-width:90px;text-align:center;opacity:.85;font-variant-numeric:tabular-nums}
+
+  #stage{flex:1;min-height:0;position:relative;overflow:hidden;touch-action:none;cursor:grab}
+  #stage.dragging{cursor:grabbing}
+  #stage.panning{cursor:grab}
+  #stage.panning.dragging{cursor:grabbing}
+  #shift{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;will-change:transform}
+  #book{position:relative;flex:none}
+
+  .base{position:absolute;left:0;width:100%;height:50%;background:transparent;z-index:1;pointer-events:none}
+  .base.low{top:50%;box-shadow:0 22px 46px rgba(0,0,0,.6),0 3px 8px rgba(0,0,0,.45)}
+  .base.up{top:0;box-shadow:0 -22px 46px rgba(0,0,0,.6),0 -3px 8px rgba(0,0,0,.45)}
+  body.book-mode .base{top:0;width:50%;height:100%}
+  body.book-mode .base.low{left:50%;box-shadow:22px 0 46px rgba(0,0,0,.25)}
+  body.book-mode .base.up{left:0;box-shadow:-22px 0 46px rgba(0,0,0,.25)}
+  .cast{position:absolute;left:0;width:100%;height:50%;pointer-events:none;opacity:0;z-index:500}
+  .cast.low{top:50%;background:linear-gradient(to bottom,rgba(0,0,0,.85),rgba(0,0,0,0) 75%)}
+  .cast.up{top:0;background:linear-gradient(to top,rgba(0,0,0,.85),rgba(0,0,0,0) 75%)}
+  body.book-mode .cast{top:0;width:50%;height:100%}
+  body.book-mode .cast.low{left:50%;background:linear-gradient(to right,rgba(0,0,0,.65),transparent 75%)}
+  body.book-mode .cast.up{left:0;background:linear-gradient(to left,rgba(0,0,0,.65),transparent 75%)}
+
+  .sheet{position:absolute;left:0;top:50%;width:100%;height:50%;transform-origin:50% 0;transform-style:preserve-3d;will-change:transform}
+  .seg{position:absolute;left:0;top:0;width:100%;transform-origin:50% 0;transform-style:preserve-3d}
+  body.book-mode .sheet{left:50%;top:0;width:50%;height:100%;transform-origin:0 50%}
+  body.book-mode .seg{top:0;height:100%;transform-origin:0 50%;backface-visibility:visible}
+  body.book-mode .piece.back{transform:rotateY(180deg)}
+  .piece{
+    position:absolute;left:0;top:0;width:100%;height:calc(100% + 1px);
+    background:#fff;overflow:hidden;
+    backface-visibility:hidden;-webkit-backface-visibility:hidden;
+  }
+  .piece.back{transform:rotateX(180deg)}
+  body.book-mode .piece.back{transform:rotateY(180deg)}
+  .piece canvas{position:absolute;left:0;top:0;width:100%;height:100%;display:block}
+  .shade{position:absolute;inset:0;pointer-events:none}
+
+  #empty{
+    position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:20;padding:20px;
+  }
+  #empty .card{
+    max-width:460px;text-align:center;padding:30px 28px;border-radius:18px;
+    background:rgba(20,24,33,.82);border:1px dashed rgba(255,255,255,.28);
+    box-shadow:0 20px 60px rgba(0,0,0,.5);
+  }
+  #empty h1{margin:0 0 8px;font-size:22px}
+  #empty p{margin:6px 0 16px;opacity:.75}
+  #empty .row{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+  #empty small{display:block;margin-top:16px;opacity:.5}
+  body.over #stage::after{
+    content:"Lepas file PDF di sini";position:absolute;inset:14px;z-index:30;
+    display:flex;align-items:center;justify-content:center;font-size:22px;
+    border:3px dashed #7aa2ff;border-radius:18px;background:rgba(76,125,255,.18);
+  }
+  #status{position:absolute;left:0;right:0;bottom:10px;text-align:center;font-size:12px;opacity:.6;pointer-events:none}
+  body.embedded #title{max-width:24vw}
+  body.embedded #openBtn{display:none}
+  body.embedded #closeBtn{display:inline-flex}
+  #closeBtn{display:none}
+  .zoom-controls{position:fixed;right:18px;bottom:18px;z-index:40;display:flex;flex-direction:column;gap:8px}
+  .zoom-controls button{width:48px;height:48px;padding:0;border-radius:50%;font-size:28px;font-weight:600;color:#222;background:#fff;border:1px solid #aaa;box-shadow:0 2px 10px #0006}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="bar">
+    <span id="title">PDF Flip Viewer</span>
+    <span class="sp"></span>
+    <button id="prevBtn" title="Halaman sebelumnya (↑ / ←)">◀</button>
+    <input id="pageInput" type="number" min="1" value="1" title="Lompat ke halaman">
+    <span id="label">–</span>
+    <button id="nextBtn" title="Halaman berikutnya (↓ / →)">▶</button>
+    <span class="sp"></span>
+    <button id="soundBtn" title="Suara balik halaman">🔊</button>
+    <button id="fsBtn" title="Layar penuh">⛶</button>
+    <button id="closeBtn" title="Tutup tampilan kalender">✕</button>
+    <button id="openBtn" class="primary">Buka PDF</button>
+    <input id="fileInput" type="file" accept="application/pdf,.pdf" hidden>
+  </div>
+
+  <div id="stage">
+    <div id="shift"><div id="book"></div></div>
+    <div id="empty">
+      <div class="card">
+        <h1>PDF Flip Viewer</h1>
+        <p>Buka file PDF dan balik halamannya seperti buku sungguhan, dari bawah ke atas.</p>
+        <div class="row">
+          <button class="primary" id="openBtn2">Buka PDF</button>
+          <button id="demoBtn">Coba contoh</button>
+        </div>
+        <small>Atau seret &amp; lepas file PDF ke sini</small>
+      </div>
+    </div>
+    <div id="status"></div>
+  </div>
+  <div class="zoom-controls" aria-label="Zoom kalender"><button id="zoomInBtn" type="button" aria-label="Perbesar" title="Perbesar">+</button><button id="zoomOutBtn" type="button" aria-label="Perkecil" title="Perkecil">−</button></div>
+</div>
+
+<script src="vendor/js/pdf.min.js"></script>
+<script>
+(() => {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const stage = $('stage'), shiftEl = $('shift'), book = $('book');
+  const prevBtn = $('prevBtn'), nextBtn = $('nextBtn'), pageInput = $('pageInput');
+  const label = $('label'), titleEl = $('title'), statusEl = $('status'), emptyEl = $('empty');
+  const fileInput = $('fileInput');
+
+  if (window.pdfjsLib) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/js/pdf.worker.min.js';
+  }
+  const embedded = new URLSearchParams(location.search).has('embed');
+  if (embedded) document.body.classList.add('embedded');
+  let currentPdf = null;
+  const sendToApp = data => {
+    if (embedded) parent.postMessage(data, location.origin);
+  };
+  $('closeBtn').onclick = () => sendToApp({ type: 'han-pustaka-calendar-close' });
+
+  // ---------- konstanta & state ----------
+  let SEG = 8;
+  let BEND = 28;
+  const RAD = Math.PI / 180;
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+  let src = null;           // {n, aspect, name, mode, render(p, canvas, Wd, Hd) -> {promise, cancel}}
+  let bookMode = false;
+  let N = 0, S = 0, maxS = 0, s = 0;
+  let zoom = 1;
+  let ang = new Float32Array(0);
+  const sheets = new Map(); // k -> sheet DOM
+  const fly = new Set();    // sheet yang sedang di tengah gerakan
+  const anims = new Map();
+  let PW = 0, PH = 0, Wd = 0, Hd = 0, hs = 0, sizeKey = '', shiftPx = 0, panX = 0, panY = 0;
+  let baseLow, baseUp, castLow, castUp;
+  let drag = null, rafId = 0;
+
+  // ---------- helper DOM ----------
+  function mk(cls, parent) {
+    const d = document.createElement('div');
+    d.className = cls;
+    if (parent) parent.appendChild(d);
+    return d;
+  }
+
+  // ---------- layout ----------
+  function layout() {
+    const r = stage.getBoundingClientRect();
+    const availW = Math.max(120, r.width - 32) * zoom / 1.12;
+    const availH = Math.max(120, r.height - 40) * zoom;
+    const ar = src ? src.aspect : 0.75;
+    if (bookMode) {
+      PH = Math.floor(Math.min(availH, availW / (2 * ar)));
+      PW = Math.floor(PH * ar);
+      book.style.width = (2 * PW) + 'px';
+      book.style.height = PH + 'px';
+    } else {
+      PH = Math.floor(Math.min(availH / 2, availW / ar));
+      PW = Math.floor(PH * ar);
+      book.style.width = PW + 'px';
+      book.style.height = (2 * PH) + 'px';
+    }
+    book.style.perspective = (7 * PH) + 'px';
+    stage.classList.toggle('panning', zoom > 1);
+    const boundsX = Math.max(0, ((bookMode ? 2 * PW : PW) - r.width + 32) / 2);
+    const boundsY = Math.max(0, ((bookMode ? PH : 2 * PH) - r.height + 40) / 2);
+    panX = clamp(panX, -boundsX, boundsX);
+    panY = clamp(panY, -boundsY, boundsY);
+    if (bookMode) shiftEl.style.transform = `translate(${(panX - (s === 0 ? PW / 2 : 0)).toFixed(2)}px,${panY.toFixed(2)}px)`;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    Wd = Math.max(2, Math.round(PW * dpr));
+    hs = Math.max(2, Math.round(PH * dpr / SEG));
+    Hd = hs * SEG;
+    sizeKey = Wd + 'x' + Hd;
+  }
+
+  // ---------- sheet ----------
+  function ensureSheet(k) {
+    let sh = sheets.get(k);
+    if (sh) return sh;
+    const el = mk('sheet', book);
+    const segs = [], front = [], back = [];
+    let parent = el;
+    for (let i = 0; i < SEG; i++) {
+      const seg = mk('seg', parent);
+      if (bookMode) {
+        if (i === 0) { seg.style.width = `${100 / SEG}%`; seg.style.height = '100%'; }
+        else { seg.style.left = '100%'; seg.style.width = '100%'; seg.style.height = '100%'; }
+      } else if (i === 0) seg.style.height = `${100 / SEG}%`;
+      else { seg.style.height = '100%'; seg.style.top = '100%'; }
+      const pf = mk('piece front', seg), pb = mk('piece back', seg);
+      const cf = document.createElement('canvas'), cb = document.createElement('canvas');
+      pf.appendChild(cf); pb.appendChild(cb);
+      const fs = mk('shade', pf), bs = mk('shade', pb);
+      segs.push({ el: seg, fs, bs });
+      front.push(cf); back.push(cb);
+      parent = seg;
+    }
+    sh = { el, segs, front, back, kf: null, kb: null, key: '' };
+    sheets.set(k, sh);
+    apply(k);
+    return sh;
+  }
+
+  function freeSheet(k) {
+    const sh = sheets.get(k);
+    if (!sh) return;
+    sh.el.remove();
+    sheets.delete(k);
+  }
+
+  function apply(k) {
+    const a = ang[k];
+    const flying = a > 0.05 && a < 179.95;
+    if (flying) fly.add(k); else fly.delete(k);
+    const sh = sheets.get(k);
+    if (!sh) return;
+    const T = flying ? BEND * Math.sin(a * RAD) : 0;
+    const c = SEG > 1 ? T / (SEG - 1) : 0;
+    let z;
+    if (flying) z = 100000 + (a >= 90 ? k : -k);
+    else z = k < s ? 100 - (s - 1 - k) : 100 - (k - s);
+    const key = a.toFixed(2) + '|' + z;
+    if (key === sh.key) return;
+    sh.key = key;
+    sh.el.style.transform = bookMode ? `rotateY(${-a}deg)` : `rotateX(${a}deg)`;
+    sh.el.style.zIndex = z;
+    for (let i = 0; i < SEG; i++) {
+      const sg = sh.segs[i];
+      if (bookMode) sg.el.style.transform = `rotateY(${i * c}deg)`;
+      else if (i > 0) sg.el.style.transform = `rotateX(${c}deg)`;
+      const th = a + i * c;
+      const fd = th <= 90 ? 0.5 * Math.pow(Math.max(0, th) / 90, 1.3) : 0.5;
+      const bd = th >= 90 ? 0.5 * Math.pow(Math.max(0, 180 - th) / 90, 1.3) : 0.5;
+      sg.fs.style.background = (i === 0
+        ? `linear-gradient(to ${bookMode ? 'right' : 'bottom'},rgba(0,0,0,.30),rgba(0,0,0,0) 55%),`
+        : '') + 'rgba(0,0,0,' + fd.toFixed(3) + ')';
+      sg.bs.style.background = (i === 0
+        ? `linear-gradient(to ${bookMode ? 'left' : 'top'},rgba(0,0,0,.30),rgba(0,0,0,0) 55%),`
+        : '') + 'rgba(0,0,0,' + bd.toFixed(3) + ')';
+    }
+  }
+
+  function updateGlobal() {
+    if (!S) return;
+    const a0 = ang[0], aL = ang[S - 1];
+    if (bookMode) {
+      shiftPx = 0;
+      shiftEl.style.transform = 'translate(' + (panX - (s === 0 ? PW / 2 : 0)).toFixed(2) + 'px,' + panY.toFixed(2) + 'px)';
+    } else {
+      shiftPx = -PH / 2 * (1 - a0 / 180) + PH / 2 * (aL / 180);
+      shiftEl.style.transform = 'translate(' + panX.toFixed(2) + 'px,' + (shiftPx + panY).toFixed(2) + 'px)';
+    }
+    baseLow.style.opacity = (1 - aL / 180).toFixed(3);
+    baseUp.style.opacity = (a0 / 180).toFixed(3);
+    let cl = 0, cu = 0;
+    for (const k of fly) {
+      const a = ang[k], sn = Math.sin(a * RAD);
+      if (k + 1 < S) cl = Math.max(cl, 0.5 * sn * clamp((135 - a) / 45, 0, 1));
+      if (k >= 1) cu = Math.max(cu, 0.5 * sn * clamp((a - 45) / 45, 0, 1));
+    }
+    castLow.style.opacity = cl.toFixed(3);
+    castUp.style.opacity = cu.toFixed(3);
+  }
+
+  function refreshWindow() {
+    if (!S) return;
+    const lo = Math.max(0, s - 3), hi = Math.min(S - 1, s + 3);
+    for (let k = lo; k <= hi; k++) ensureSheet(k);
+    for (const [k, sh] of Array.from(sheets)) {
+      const inWin = k >= lo && k <= hi;
+      const flying = fly.has(k);
+      const visibleBookLeaf = !bookMode || k === s - 1 || k === s;
+      sh.el.style.display = ((inWin && visibleBookLeaf) || flying) ? '' : 'none';
+      if (!inWin && !flying && (k < s - 6 || k > s + 6)) { freeSheet(k); continue; }
+      sh.key = '';
+      apply(k);
+    }
+    updateGlobal();
+    refreshQueue();
+  }
+
+  // ---------- render antrian ----------
+  let queue = [], pumping = false, curTask = null, epoch = 0;
+
+  function refreshQueue() {
+    queue = [];
+    const b = 2 * s;
+    [b + 1, b, b + 2, b - 1, b + 3, b - 2, b + 4, b + 5, b - 3].forEach(p => {
+      if (p >= 1 && p <= N) queue.push(p);
+    });
+    pump();
+  }
+  async function pump() {
+    if (pumping) return;
+    pumping = true;
+    try {
+      while (queue.length) await renderPage(queue.shift());
+    } finally { pumping = false; }
+  }
+  async function renderPage(p) {
+    const k = (p - 1) >> 1, sh = sheets.get(k);
+    if (!sh || !src) return;
+    const odd = (p & 1) === 1, kk = odd ? 'kf' : 'kb', arr = odd ? sh.front : sh.back;
+    if (sh[kk] === sizeKey) return true;
+    const ep = epoch, mySize = sizeKey, w = Wd, h = Hd, strip = hs;
+    const offscreen = document.createElement('canvas');
+    let task;
+    try { task = src.render(p, offscreen, w, h); curTask = task; await task.promise; }
+    catch (e) { return false; }
+    if (ep !== epoch || sheets.get(k) !== sh || mySize !== sizeKey) return false;
+    for (let i = 0; i < SEG; i++) {
+      const si = odd ? i : SEG - 1 - i;
+      const c = arr[i];
+      if (bookMode) {
+        const pageStrip = Math.ceil(w / SEG);
+        c.width = pageStrip; c.height = h;
+        c.getContext('2d').drawImage(offscreen, si * pageStrip, 0, pageStrip, h, 0, 0, pageStrip, h);
+      } else {
+        c.width = w; c.height = strip;
+        c.getContext('2d').drawImage(offscreen, 0, si * strip, w, strip, 0, 0, w, strip);
+      }
+    }
+    sh[kk] = mySize;
+    return true;
+  }
+  function invalidateRender() {
+    epoch++;
+    if (curTask) { try { curTask.cancel(); } catch (e) {} }
+    for (const sh of sheets.values()) { sh.kf = null; sh.kb = null; }
+  }
+
+  // ---------- animasi ----------
+  const ease = t => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  function animate(k, to) {
+    const from = ang[k];
+    if (from === to) { anims.delete(k); apply(k); updateGlobal(); return; }
+    const dur = 450 + 700 * Math.abs(to - from) / 180;
+    anims.set(k, { from, to, t0: performance.now(), dur });
+    if (!rafId) rafId = requestAnimationFrame(frame);
+  }
+  function frame(now) {
+    rafId = 0;
+    for (const [k, an] of Array.from(anims)) {
+      const t = (now - an.t0) / an.dur;
+      if (t >= 1) { ang[k] = an.to; anims.delete(k); }
+      else ang[k] = an.from + (an.to - an.from) * ease(t);
+      apply(k);
+    }
+    updateGlobal();
+    if (anims.size) rafId = requestAnimationFrame(frame);
+    else refreshWindow();
+  }
+
+  // ---------- navigasi ----------
+  let navigating = false;
+  async function goTo(ns) {
+    if (!src) return;
+    ns = clamp(ns, 0, maxS);
+    if (ns === s || navigating) return;
+    navigating = true;
+    if (bookMode) {
+      const targetPages = ns === 0 ? [1] : [2 * ns, 2 * ns + 1].filter(page => page <= N);
+      const targetSheets = [...new Set(targetPages.map(page => (page - 1) >> 1))];
+      targetSheets.forEach(ensureSheet);
+      for (const page of targetPages) {
+        if (!await renderPage(page)) {
+          navigating = false;
+          return;
+        }
+      }
+    }
+    const old = s, d = ns - old;
+    s = ns;
+    const b = d > 0 ? ns - 1 : ns;
+    if (Math.abs(d) > 1) {
+      anims.clear();
+      for (let k = 0; k < S; k++) {
+        ang[k] = k < ns ? 180 : 0;
+      }
+      ang[b] = d > 0 ? 0 : 180;
+      fly.clear();
+      for (const k of sheets.keys()) sheets.get(k).key = '';
+    }
+    refreshWindow();
+    animate(b, d > 0 ? 180 : 0);
+    swish();
+    updateUI();
+    navigating = false;
+  }
+  const next = () => goTo(s + 1);
+  const prev = () => goTo(s - 1);
+
+  function updateUI() {
+    if (!src) { label.textContent = '–'; prevBtn.disabled = nextBtn.disabled = true; return; }
+    const top = 2 * s, bot = 2 * s + 1, arr = [];
+    if (bookMode && s === 0) arr.push(1);
+    else if (top >= 1 && top <= N) arr.push(top);
+    if ((!bookMode || s > 0) && bot <= N) arr.push(bot);
+    label.textContent = (arr.length > 1 ? arr[0] + '–' + arr[1] : arr[0]) + ' / ' + N;
+    if (document.activeElement !== pageInput) pageInput.value = arr[0];
+    pageInput.max = N;
+    prevBtn.disabled = s <= 0;
+    nextBtn.disabled = s >= maxS;
+    sendToApp({ type: 'han-pustaka-calendar-page', page: arr[0], numPages: N });
+  }
+
+  // ---------- interaksi drag ----------
+  const spineY = () => {
+    const r = stage.getBoundingClientRect();
+    return r.top + r.height / 2 + shiftPx;
+  };
+  const spineX = () => stage.getBoundingClientRect().left + stage.getBoundingClientRect().width / 2 + panX - (s === 0 ? PW / 2 : 0);
+  stage.addEventListener('pointerdown', e => {
+    if (!src || e.button > 0 || e.target.closest('#empty')) return;
+    if (zoom > 1 && !(bookMode && e.target.closest('.sheet'))) {
+      drag = { pan: true, sx: e.clientX, sy: e.clientY, px: panX, py: panY, id: e.pointerId };
+      try { stage.setPointerCapture(e.pointerId); } catch (_) {}
+      return;
+    }
+    const sp = bookMode ? spineX() : spineY(), lower = bookMode ? e.clientX >= sp : e.clientY >= sp;
+    let k, dir;
+    if (lower) { if (s >= maxS) return; k = s; dir = 1; }
+    else { if (s <= 0) return; k = s - 1; dir = -1; }
+    drag = { k, dir, sy: e.clientY, sx: e.clientX, g: Math.max(Math.abs((bookMode ? e.clientX : e.clientY) - sp), 14),
+             moved: false, ly: e.clientY, vy: 0, id: e.pointerId };
+    try { stage.setPointerCapture(e.pointerId); } catch (_) {}
+  });
+  stage.addEventListener('pointermove', e => {
+    if (!drag || e.pointerId !== drag.id) return;
+    if (drag.pan) {
+      const r = stage.getBoundingClientRect();
+      const boundsX = Math.max(0, ((bookMode ? 2 * PW : PW) - r.width + 32) / 2);
+      const boundsY = Math.max(0, ((bookMode ? PH : 2 * PH) - r.height + 40) / 2);
+      panX = clamp(drag.px + e.clientX - drag.sx, -boundsX, boundsX);
+      panY = clamp(drag.py + e.clientY - drag.sy, -boundsY, boundsY);
+      stage.classList.add('dragging');
+      updateGlobal();
+      return;
+    }
+    if (!drag.moved) {
+      if (Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < 6) return;
+      drag.moved = true;
+      anims.delete(drag.k);
+      ensureSheet(drag.k);
+      stage.classList.add('dragging');
+    }
+    const point = bookMode ? e.clientX : e.clientY;
+    const lastPoint = bookMode ? (drag.lx ?? drag.sx) : drag.ly;
+    drag.vy = 0.6 * drag.vy + 0.4 * (point - lastPoint);
+    if (bookMode) drag.lx = point; else drag.ly = point;
+    const c = clamp((point - (bookMode ? spineX() : spineY())) / drag.g, -1, 1);
+    ang[drag.k] = bookMode && drag.dir < 0 ? 180 - Math.acos(-c) / RAD : Math.acos(c) / RAD;
+    apply(drag.k);
+    updateGlobal();
+  });
+  function endDrag(e, cancelled) {
+    if (!drag || (e && e.pointerId !== drag.id)) return;
+    const d = drag; drag = null;
+    stage.classList.remove('dragging');
+    try { stage.releasePointerCapture(d.id); } catch (_) {}
+    if (d.pan) return;
+    if (!d.moved) {
+      if (cancelled) return;
+      d.dir > 0 ? next() : prev();
+      return;
+    }
+    const a = ang[d.k];
+    let complete;
+    if (d.dir > 0) complete = d.vy < -1.5 ? true : d.vy > 1.5 ? false : a > 90;
+    else complete = d.vy > 1.5 ? true : d.vy < -1.5 ? false : a < 90;
+    if (d.dir > 0) { s = complete ? d.k + 1 : d.k; animate(d.k, complete ? 180 : 0); }
+    else { s = complete ? d.k : d.k + 1; animate(d.k, complete ? 0 : 180); }
+    if (complete) swish();
+    refreshWindow();
+    updateUI();
+  }
+  stage.addEventListener('pointerup', e => endDrag(e, false));
+  stage.addEventListener('pointercancel', e => endDrag(e, true));
+
+  let lastWheel = 0;
+  stage.addEventListener('wheel', e => {
+    if (!src) return;
+    e.preventDefault();
+    const now = performance.now();
+    if (now - lastWheel < 380 || Math.abs(e.deltaY) < 4) return;
+    lastWheel = now;
+    e.deltaY > 0 ? next() : prev();
+  }, { passive: false });
+
+  window.addEventListener('keydown', e => {
+    if (e.target && e.target.tagName === 'INPUT') return;
+    switch (e.key) {
+      case 'ArrowDown': case 'ArrowRight': case 'PageDown': case ' ': next(); break;
+      case 'ArrowUp': case 'ArrowLeft': case 'PageUp': prev(); break;
+      case 'Home': goTo(0); break;
+      case 'End': goTo(maxS); break;
+      default: return;
+    }
+    e.preventDefault();
+  });
+
+  prevBtn.onclick = prev;
+  nextBtn.onclick = next;
+  pageInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      const p = parseInt(pageInput.value, 10);
+      if (p >= 1) goTo(Math.floor(clamp(p, 1, N) / 2));
+      pageInput.blur();
+    }
+    e.stopPropagation();
+  });
+  $('fsBtn').onclick = () => {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else (document.documentElement.requestFullscreen || (() => {})).call(document.documentElement);
+  };
+  $('zoomInBtn').onclick = () => { zoom = clamp(zoom + .15, .6, 2.5); layout(); if (src) { invalidateRender(); refreshQueue(); } };
+  $('zoomOutBtn').onclick = () => { zoom = clamp(zoom - .15, .6, 2.5); layout(); if (src) { invalidateRender(); refreshQueue(); } };
+
+  // ---------- suara ----------
+  const flipAudio = new Audio('vendor/mp3/turnPage.mp3');
+  flipAudio.preload = 'auto';
+  let soundOn = true;
+  $('soundBtn').onclick = () => { soundOn = !soundOn; $('soundBtn').textContent = soundOn ? '🔊' : '🔇'; };
+  function swish() {
+    if (!soundOn) return;
+    flipAudio.currentTime = 0;
+    flipAudio.play().catch(() => {});
+  }
+
+  // ---------- memulai dokumen ----------
+  function start(source, initialPage = 1) {
+    epoch++;
+    if (curTask) { try { curTask.cancel(); } catch (e) {} }
+    anims.clear(); fly.clear(); sheets.clear(); queue = [];
+    book.innerHTML = '';
+    src = source; N = src.n; bookMode = (src.mode || new URLSearchParams(location.search).get('mode')) === 'book';
+    SEG = bookMode ? 1 : 8;
+    BEND = bookMode ? 0 : 28;
+    document.body.classList.toggle('book-mode', bookMode);
+    S = Math.ceil(N / 2); maxS = Math.floor(N / 2); s = clamp(initialPage === 1 ? 0 : Math.floor(initialPage / 2), 0, maxS);
+    ang = new Float32Array(S);
+    for (let k = 0; k < s; k++) ang[k] = 180;
+    baseLow = mk('base low', book); baseUp = mk('base up', book);
+    castLow = mk('cast low', book); castUp = mk('cast up', book);
+    layout();
+    emptyEl.style.display = 'none';
+    titleEl.textContent = src.name || 'Dokumen';
+    document.title = (src.name || 'Dokumen') + ' – PDF Flip Viewer';
+    refreshWindow();
+    updateUI();
+    statusEl.textContent = '';
+    setTimeout(() => { if (statusEl.textContent.startsWith('Klik')) statusEl.textContent = ''; }, 6000);
+  }
+
+  // ---------- sumber PDF ----------
+  async function openPdf(data, name, initialPage = 1) {
+    if (!window.pdfjsLib) {
+      alert('Library pdf.js gagal dimuat. Pastikan terhubung ke internet lalu muat ulang halaman.');
+      return;
+    }
+    statusEl.textContent = 'Memuat PDF…';
+    try {
+      const task = pdfjsLib.getDocument(typeof data === 'string' ? { url: data } : { data });
+      task.onPassword = (cb, reason) => {
+        const pw = prompt(reason === 2 ? 'Password salah, coba lagi:' : 'PDF ini dilindungi password:');
+        if (pw === null) task.destroy(); else cb(pw);
+      };
+      const doc = await task.promise;
+      if (currentPdf && currentPdf !== doc) currentPdf.destroy();
+      currentPdf = doc;
+      const p1 = await doc.getPage(1);
+      const vp = p1.getViewport({ scale: 1 });
+      start({
+        n: doc.numPages,
+        aspect: vp.width / vp.height,
+        mode: bookMode ? 'book' : 'calendar',
+        name,
+        render(p, canvas, W, H) {
+          let cancelled = false, rt = null;
+          const promise = (async () => {
+            const page = await doc.getPage(p);
+            if (cancelled) throw new Error('cancelled');
+            const v1 = page.getViewport({ scale: 1 });
+            const sc = Math.min(W / v1.width, H / v1.height);
+            const v = page.getViewport({ scale: sc });
+            canvas.width = W; canvas.height = H;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+            rt = page.render({
+              canvasContext: ctx, viewport: v,
+              transform: [1, 0, 0, 1, (W - v.width) / 2, (H - v.height) / 2]
+            });
+            await rt.promise;
+          })();
+          return { promise, cancel() { cancelled = true; if (rt) rt.cancel(); } };
+        }
+      }, initialPage);
+    } catch (err) {
+      if (err && err.name === 'PasswordException') return;
+      statusEl.textContent = '';
+      sendToApp({ type: 'han-pustaka-calendar-error', message: err && err.message ? err.message : String(err) });
+      alert('Gagal membuka PDF: ' + (err && err.message ? err.message : err));
+    }
+  }
+
+  async function openFile(file) {
+    if (!file) return;
+    if (file.type && file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)) {
+      alert('File harus berformat PDF.'); return;
+    }
+    openPdf(await file.arrayBuffer(), file.name);
+  }
+
+  // ---------- sumber demo ----------
+  function demoSource() {
+    const hues = [215, 340, 150, 28, 270, 190, 5, 100, 320, 48, 240, 170];
+    const rng = seed => () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+    return {
+      n: 12, aspect: 0.75, name: 'Contoh Demo (12 halaman)',
+      render(p, canvas, W, H) {
+        canvas.width = W; canvas.height = H;
+        const ctx = canvas.getContext('2d');
+        ctx.save(); ctx.scale(W / 600, H / 800);
+        const hue = hues[(p - 1) % hues.length], r = rng(p * 977);
+        if (p === 1) {
+          const g = ctx.createLinearGradient(0, 0, 600, 800);
+          g.addColorStop(0, '#1b2440'); g.addColorStop(1, '#6a3cff');
+          ctx.fillStyle = g; ctx.fillRect(0, 0, 600, 800);
+          for (let i = 0; i < 9; i++) {
+            ctx.beginPath();
+            ctx.arc(80 + r() * 440, 80 + r() * 640, 30 + r() * 110, 0, 7);
+            ctx.fillStyle = 'rgba(255,255,255,' + (0.04 + r() * 0.08) + ')'; ctx.fill();
+          }
+          ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
+          ctx.font = '700 64px system-ui,sans-serif'; ctx.fillText('Flipbook', 300, 360);
+          ctx.font = '400 24px system-ui,sans-serif';
+          ctx.fillText('flip pagess', 300, 410);
+          ctx.globalAlpha = .6; ctx.font = '400 18px system-ui,sans-serif';
+          ctx.fillText('Click / drag pages', 300, 700);
+        } else {
+          ctx.fillStyle = '#fdfcf8'; ctx.fillRect(0, 0, 600, 800);
+          ctx.fillStyle = 'hsl(' + hue + ',70%,55%)'; ctx.fillRect(0, 0, 600, 120);
+          ctx.fillStyle = '#fff'; ctx.font = '700 34px system-ui,sans-serif'; ctx.textAlign = 'left';
+          ctx.fillText('Bab ' + (p - 1), 48, 74);
+          ctx.fillStyle = 'hsl(' + hue + ',60%,92%)';
+          ctx.beginPath(); ctx.arc(450, 270, 100, 0, 7); ctx.fill();
+          ctx.fillStyle = 'hsl(' + hue + ',65%,45%)'; ctx.font = '700 120px system-ui,sans-serif';
+          ctx.textAlign = 'center'; ctx.fillText(String(p), 450, 312);
+          ctx.fillStyle = '#2a2f3a'; ctx.textAlign = 'left'; ctx.font = '600 26px system-ui,sans-serif';
+          ctx.fillText('Judul bagian ' + p, 48, 214);
+          for (let y = 340; y < 700; y += 26) {
+            const w = 504 * (0.55 + r() * 0.45);
+            ctx.fillStyle = '#d9dce3';
+            ctx.fillRect(48, y, y > 640 ? w * .5 : w, 10);
+          }
+          ctx.fillStyle = '#8a90a0'; ctx.font = '400 18px system-ui,sans-serif';
+          ctx.textAlign = p % 2 ? 'right' : 'left';
+          ctx.fillText(String(p), p % 2 ? 552 : 48, 760);
+        }
+        ctx.restore();
+        return { promise: Promise.resolve(), cancel() {} };
+      }
+    };
+  }
+
+  // ---------- tombol & drag-drop ----------
+  $('openBtn').onclick = $('openBtn2').onclick = () => fileInput.click();
+  fileInput.onchange = () => { openFile(fileInput.files[0]); fileInput.value = ''; };
+  $('demoBtn').onclick = () => start(demoSource());
+
+  ['dragenter', 'dragover'].forEach(ev => window.addEventListener(ev, e => {
+    e.preventDefault(); document.body.classList.add('over');
+  }));
+  ['dragleave', 'drop'].forEach(ev => window.addEventListener(ev, e => {
+    e.preventDefault();
+    if (ev === 'drop' || e.target === document.documentElement || !e.relatedTarget) document.body.classList.remove('over');
+  }));
+  window.addEventListener('drop', e => {
+    document.body.classList.remove('over');
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) openFile(f);
+  });
+
+  let rsT = 0;
+  window.addEventListener('resize', () => {
+    layout();
+    clearTimeout(rsT);
+    rsT = setTimeout(() => { if (src) { invalidateRender(); refreshQueue(); } }, 160);
+  });
+
+  layout();
+  updateUI();
+
+  const q = new URLSearchParams(location.search);
+  bookMode = q.get('mode') === 'book';
+  document.body.classList.toggle('book-mode', bookMode);
+  if (embedded) {
+    emptyEl.style.display = 'none';
+    window.addEventListener('message', event => {
+      if (event.origin !== location.origin || event.source !== parent || event.data?.type !== 'han-pustaka-open-calendar') return;
+      bookMode = event.data.mode === 'book';
+      document.body.classList.toggle('book-mode', bookMode);
+      titleEl.textContent = event.data.name || 'Kalender';
+      openPdf(new Uint8Array(event.data.data), event.data.name || 'Kalender', event.data.lastPage || 1);
+    });
+  } else if (q.get('file')) openPdf(q.get('file'), q.get('file').split('/').pop());
+  else if (q.has('demo')) start(demoSource());
+})();
+</script>
+</body>
+</html>
